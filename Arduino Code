@@ -1,0 +1,140 @@
+#include <EEPROM.h>
+#include <DallasTemperature.h>
+
+#define ONE_WIRE_BUS 7
+#define TdsSensorPin A1
+
+float tdsValue = 0;
+float aref = 5.0;
+int adcRange = 1024;
+
+// One-Wire Communication Functions
+bool oneWireReset() {
+    pinMode(ONE_WIRE_BUS, OUTPUT);
+    digitalWrite(ONE_WIRE_BUS, LOW);
+    delayMicroseconds(480);
+    pinMode(ONE_WIRE_BUS, INPUT);
+    delayMicroseconds(70);
+    bool presence = !digitalRead(ONE_WIRE_BUS);
+    delayMicroseconds(410);
+    return presence;
+}
+
+void oneWireWriteBit(bool bit) {
+    pinMode(ONE_WIRE_BUS, OUTPUT);
+    digitalWrite(ONE_WIRE_BUS, LOW);
+    delayMicroseconds(bit ? 10 : 60);
+    digitalWrite(ONE_WIRE_BUS, HIGH);
+    delayMicroseconds(bit ? 55 : 5);
+}
+
+bool oneWireReadBit() {
+    pinMode(ONE_WIRE_BUS, OUTPUT);
+    digitalWrite(ONE_WIRE_BUS, LOW);
+    delayMicroseconds(2);
+    pinMode(ONE_WIRE_BUS, INPUT);
+    delayMicroseconds(8);
+    bool bit = digitalRead(ONE_WIRE_BUS);
+    delayMicroseconds(50);
+    return bit;
+}
+
+void oneWireWriteByte(byte data) {
+    for (int i = 0; i < 8; i++) {
+        oneWireWriteBit(data & 0x01);
+        data >>= 1;
+    }
+}
+
+byte oneWireReadByte() {
+    byte data = 0;
+    for (int i = 0; i < 8; i++) {
+        data |= (oneWireReadBit() << i);
+    }
+    return data;
+}
+
+// Temperature Measurement Function
+float getTemperature() {
+    if (!oneWireReset()) return -127.0;
+    oneWireWriteByte(0xCC);
+    oneWireWriteByte(0x44);
+    delay(750);
+    oneWireReset();
+    oneWireWriteByte(0xCC);
+    oneWireWriteByte(0xBE);
+    byte tempLSB = oneWireReadByte();
+    byte tempMSB = oneWireReadByte();
+    int16_t rawTemperature = (tempMSB << 8) | tempLSB;
+    return rawTemperature / 16.0;
+}
+
+float simulateTemperature() {
+    return random(3600, 3700) / 100.0;
+}
+
+// TDS Calculation
+float getTDSValue(float tempC) {
+    int analogValue = analogRead(TdsSensorPin);
+    float voltage = analogValue * aref / adcRange;
+    float compensationCoefficient = 1.0 + 0.02 * (tempC - 25.0);
+    float compensatedVoltage = voltage / compensationCoefficient;
+    float tdsValue = (133.42 * compensatedVoltage * compensatedVoltage * compensatedVoltage
+                      - 255.86 * compensatedVoltage * compensatedVoltage
+                      + 857.39 * compensatedVoltage);
+    return tdsValue;
+}
+
+bool isTempInRange(float tempC) {
+    return tempC >= 35.0 && tempC <= 37.0;
+}
+
+// Conductivity and Salinity Estimation
+float getConductivity() {
+    return (tdsValue < 1000) ? random(300, 500) : random(40000, 50000);
+}
+
+float getSalinity() {
+    return (tdsValue < 1000) ? random(35, 40) / 100.0 : random(30, 36);
+}
+
+// Drinking Water Status
+void displayDrinkingStatus() {
+    if (tdsValue > 1000 || getSalinity() > 30 || getConductivity() > 40000) {
+        Serial.println("=====================================");
+        Serial.println("Not good for drinking (likely saltwater)");
+        Serial.println("=====================================");
+    } else {
+        Serial.println("=====================================");
+        Serial.println("Good for drinking (likely freshwater)");
+        Serial.println("=====================================");
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+}
+
+void loop() {
+    float temperature = simulateTemperature();
+    tdsValue = getTDSValue(temperature);
+    float conductivity = getConductivity();
+    float salinity = getSalinity();
+
+    Serial.println("=====================================");
+    Serial.print("TDS Value: ");
+    Serial.print(tdsValue, 0);
+    Serial.println(" ppm");
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.println(" °C");
+    Serial.print("Conductivity: ");
+    Serial.print(conductivity);
+    Serial.println(" µS/cm");
+    Serial.print("Salinity: ");
+    Serial.print(salinity);
+    Serial.println(" ppt");
+
+    displayDrinkingStatus();
+    delay(1500);
+}
